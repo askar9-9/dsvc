@@ -67,6 +67,53 @@ fi
 token="$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1]))["access_token"])' "$login_body")"
 
 request GET /dashboard 200 "" "$token"
+
+integration_body="$tmp_dir/integration.json"
+integration_status="$(curl -sS -o "$integration_body" -w "%{http_code}" -X POST "$BASE_URL/integrations" -H "Content-Type: application/json" -H "Authorization: Bearer $token" --data '{"name":"Smoke MQTT","domain":"mqtt","config":{"source":"smoke","host":"mock-broker"}}')"
+if [ "$integration_status" != "201" ]; then
+  echo "FAIL POST /integrations expected 201 got $integration_status"
+  cat "$integration_body"
+  exit 1
+fi
+integration_id="$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$integration_body")"
+"$PYTHON_BIN" -c 'import json,sys; body=json.load(open(sys.argv[1])); assert body["domain"] == "mqtt", body' "$integration_body"
+
+discovery_body="$tmp_dir/discovery.json"
+discovery_status="$(curl -sS -o "$discovery_body" -w "%{http_code}" "$BASE_URL/integrations/$integration_id/discovery" -H "Authorization: Bearer $token")"
+if [ "$discovery_status" != "200" ]; then
+  echo "FAIL GET /integrations/$integration_id/discovery expected 200 got $discovery_status"
+  cat "$discovery_body"
+  exit 1
+fi
+"$PYTHON_BIN" -c 'import json,sys; body=json.load(open(sys.argv[1])); strip=next(item for item in body if item["discovered_id"] == "mqtt.living_room_strip"); assert strip["entities"][0]["platform"] == "mqtt", body; assert strip["entities"][0]["attributes"]["command_topic"] == "home/living_room/strip/set", body' "$discovery_body"
+
+import_body="$tmp_dir/import.json"
+import_status="$(curl -sS -o "$import_body" -w "%{http_code}" -X POST "$BASE_URL/integrations/$integration_id/import" -H "Content-Type: application/json" -H "Authorization: Bearer $token" --data '{"discovered_ids":["mqtt.living_room_strip"]}')"
+if [ "$import_status" != "200" ]; then
+  echo "FAIL POST /integrations/$integration_id/import expected 200 got $import_status"
+  cat "$import_body"
+  exit 1
+fi
+"$PYTHON_BIN" -c 'import json,sys; body=json.load(open(sys.argv[1])); assert body["imported"] + len(body["skipped"]) == 1, body' "$import_body"
+
+mqtt_action_body="$tmp_dir/mqtt-action.json"
+mqtt_action_status="$(curl -sS -o "$mqtt_action_body" -w "%{http_code}" -X POST "$BASE_URL/actions/call" -H "Content-Type: application/json" -H "Authorization: Bearer $token" --data '{"domain":"light","action":"turn_on","target":{"entity_id":"light.mqtt_living_room_strip"},"data":{"brightness":60}}')"
+if [ "$mqtt_action_status" != "200" ]; then
+  echo "FAIL POST /actions/call expected 200 got $mqtt_action_status"
+  cat "$mqtt_action_body"
+  exit 1
+fi
+"$PYTHON_BIN" -c 'import json,sys; body=json.load(open(sys.argv[1])); assert body["new_state"] == "on", body; assert body["attributes"]["brightness"] == 60, body' "$mqtt_action_body"
+
+devices_body="$tmp_dir/devices.json"
+devices_status="$(curl -sS -o "$devices_body" -w "%{http_code}" "$BASE_URL/devices?type=light" -H "Authorization: Bearer $token")"
+if [ "$devices_status" != "200" ]; then
+  echo "FAIL GET /devices?type=light expected 200 got $devices_status"
+  cat "$devices_body"
+  exit 1
+fi
+"$PYTHON_BIN" -c 'import json,sys; body=json.load(open(sys.argv[1])); assert any(item["name"] == "MQTT Living Room Strip" for item in body), body' "$devices_body"
+
 request PATCH /entities/binary_sensor.hallway_motion/state 200 '{"state":"on"}' "$token"
 
 entity_body="$tmp_dir/entity.json"

@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Area, AutomationRun, Entity, EntityState, Event
+from app.models import Area, AutomationRun, Device, Entity, EntityState, Event, Integration
 from app.seed import EXPECTED_SEED_COUNTS, seed_counts, seed_database
 
 pytestmark = pytest.mark.asyncio
@@ -94,6 +94,174 @@ async def test_devices_crud(auth_client: AsyncClient, db_session: AsyncSession) 
 
     deleted = await auth_client.delete(f"/api/devices/{device['id']}")
     assert deleted.status_code == 204
+
+
+async def test_integrations_auth_required(client: AsyncClient) -> None:
+    response = await client.get("/api/integrations")
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthorized", "message": "Not authenticated"}
+
+
+async def test_integrations_crud_contract(auth_client: AsyncClient) -> None:
+    created = await auth_client.post("/api/integrations", json={"name": "Pairing Hub", "domain": "demo", "config": {"room": "lab"}})
+
+    assert created.status_code == 201
+    integration = created.json()
+    assert integration["name"] == "Pairing Hub"
+    assert integration["domain"] == "demo"
+    assert integration["config"] == {"room": "lab"}
+    assert integration["device_count"] == 0
+    assert "T" in integration["created_at"]
+
+    listed = await auth_client.get("/api/integrations")
+    assert listed.status_code == 200
+    assert any(item["id"] == integration["id"] for item in listed.json())
+
+    fetched = await auth_client.get(f"/api/integrations/{integration['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == integration["id"]
+
+    updated = await auth_client.patch(f"/api/integrations/{integration['id']}", json={"name": "Updated Hub", "config": {"room": "office"}})
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated Hub"
+    assert updated.json()["config"] == {"room": "office"}
+
+    deleted = await auth_client.delete(f"/api/integrations/{integration['id']}")
+    assert deleted.status_code == 204
+
+
+async def test_integration_discovery_and_idempotent_import(auth_client: AsyncClient, db_session: AsyncSession) -> None:
+    created = await auth_client.post("/api/integrations", json={"name": "Discovery Hub", "domain": "demo"})
+    integration = created.json()
+
+    discovery = await auth_client.get(f"/api/integrations/{integration['id']}/discovery")
+    assert discovery.status_code == 200
+    discovered = discovery.json()
+    assert len(discovered) == 5
+    assert discovered[0]["discovered_id"] == "demo.porch_light"
+    assert discovered[0]["suggested_entity_id"] == "light.porch_light"
+    assert all(item["already_imported"] is False for item in discovered)
+
+    imported = await auth_client.post(f"/api/integrations/{integration['id']}/import", json={})
+    assert imported.status_code == 200
+    import_body = imported.json()
+    assert import_body["integration_id"] == integration["id"]
+    assert import_body["imported"] == 5
+    assert import_body["skipped"] == []
+    assert len(import_body["devices"]) == 5
+    assert import_body["devices"][0]["entities"]
+
+    linked_devices = (
+        await db_session.execute(select(func.count(Device.id)).where(Device.integration_id == integration["id"]))
+    ).scalar_one()
+    imported_states = (
+        await db_session.execute(select(func.count(EntityState.id)).where(EntityState.entity_id.in_(["light.porch_light", "sensor.solar_meter_total"])))
+    ).scalar_one()
+    assert linked_devices == 5
+    assert imported_states == 2
+
+    repeated = await auth_client.post(f"/api/integrations/{integration['id']}/import", json={})
+    assert repeated.status_code == 200
+    repeat_body = repeated.json()
+    assert repeat_body["imported"] == 0
+    assert len(repeat_body["skipped"]) == 5
+
+    rediscovery = await auth_client.get(f"/api/integrations/{integration['id']}/discovery")
+    assert all(item["already_imported"] is True for item in rediscovery.json())
+
+
+async def test_mqtt_integration_discovery_import_and_actions(auth_client: AsyncClient, db_session: AsyncSession) -> None:
+    created = await auth_client.post("/api/integrations", json={"name": "MQTT Broker", "domain": "mqtt", "config": {"host": "mock-broker"}})
+    assert created.status_code == 201
+    integration = created.json()
+    assert integration["domain"] == "mqtt"
+
+    discovery = await auth_client.get(f"/api/integrations/{integration['id']}/discovery")
+    assert discovery.status_code == 200
+    discovered = discovery.json()
+    assert [item["discovered_id"] for item in discovered] == [
+        "mqtt.living_room_strip",
+        "mqtt.garage_relay",
+        "mqtt.office_sensor",
+    ]
+    strip = discovered[0]["entities"][0]
+    assert strip["entity_id"] == "light.mqtt_living_room_strip"
+    assert strip["platform"] == "mqtt"
+    assert strip["attributes"]["command_topic"] == "home/living_room/strip/set"
+    assert strip["attributes"]["brightness_state_topic"] == "home/living_room/strip/brightness/state"
+    sensor_entities = discovered[2]["entities"]
+    assert sensor_entities[0]["attributes"]["state_topic"] == "home/office/sensor/temperature"
+    assert sensor_entities[1]["device_class"] == "humidity"
+
+    imported = await auth_client.post(
+        f"/api/integrations/{integration['id']}/import",
+        json={"discovered_ids": ["mqtt.living_room_strip", "mqtt.garage_relay"]},
+    )
+    assert imported.status_code == 200
+    import_body = imported.json()
+    assert import_body["imported"] == 2
+    assert import_body["skipped"] == []
+
+    linked_devices = (
+        await db_session.execute(select(func.count(Device.id)).where(Device.integration_id == integration["id"]))
+    ).scalar_one()
+    linked_entities = (
+        await db_session.execute(
+            select(Entity).where(Entity.entity_id.in_(["light.mqtt_living_room_strip", "switch.mqtt_garage_relay"])).order_by(Entity.entity_id)
+        )
+    ).scalars().all()
+    initial_states = (
+        await db_session.execute(
+            select(func.count(EntityState.id)).where(EntityState.entity_id.in_(["light.mqtt_living_room_strip", "switch.mqtt_garage_relay"]))
+        )
+    ).scalar_one()
+    assert linked_devices == 2
+    assert [entity.platform for entity in linked_entities] == ["mqtt", "mqtt"]
+    assert linked_entities[0].attributes_json["state_topic"] == "home/living_room/strip/state"
+    assert initial_states == 2
+
+    light_action = await auth_client.post(
+        "/api/actions/call",
+        json={
+            "domain": "light",
+            "action": "turn_on",
+            "target": {"entity_id": "light.mqtt_living_room_strip"},
+            "data": {"brightness": 55},
+        },
+    )
+    assert light_action.status_code == 200
+    assert light_action.json()["new_state"] == "on"
+    assert light_action.json()["attributes"]["brightness"] == 55
+    assert light_action.json()["attributes"]["command_topic"] == "home/living_room/strip/set"
+
+    switch_action = await auth_client.post(
+        "/api/actions/call",
+        json={"domain": "switch", "action": "turn_on", "target": {"entity_id": "switch.mqtt_garage_relay"}},
+    )
+    assert switch_action.status_code == 200
+    assert switch_action.json()["new_state"] == "on"
+
+    repeated = await auth_client.post(
+        f"/api/integrations/{integration['id']}/import",
+        json={"discovered_ids": ["mqtt.living_room_strip", "mqtt.garage_relay"]},
+    )
+    assert repeated.status_code == 200
+    repeat_body = repeated.json()
+    assert repeat_body["imported"] == 0
+    assert len(repeat_body["skipped"]) == 2
+    assert {item["reason"] for item in repeat_body["skipped"]} == {"already_imported"}
+
+
+async def test_integration_import_validation_errors(auth_client: AsyncClient, db_session: AsyncSession) -> None:
+    unsupported = await auth_client.post("/api/integrations", json={"name": "Zigbee", "domain": "zigbee"})
+    assert unsupported.status_code == 400
+    assert unsupported.json() == {"error": "bad_request", "message": "Unsupported integration domain"}
+
+    integration = (await db_session.execute(select(Integration).where(Integration.domain == "demo").limit(1))).scalar_one()
+    unknown = await auth_client.post(f"/api/integrations/{integration.id}/import", json={"discovered_ids": ["demo.missing"]})
+    assert unknown.status_code == 400
+    assert unknown.json() == {"error": "bad_request", "message": "Unknown discovered_id: demo.missing"}
 
 
 async def test_contract_nullable_fields_and_date_serialization(auth_client: AsyncClient) -> None:

@@ -38,6 +38,7 @@ Base URL: `http://localhost:8080/api`
 - `GET /health`
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
 - `GET|POST /homes`
+- `GET|POST /integrations`, `GET|PATCH|DELETE /integrations/{id}`, `GET /integrations/{id}/discovery`, `POST /integrations/{id}/import`
 - `GET|POST /areas`, `PATCH|DELETE /areas/{id}`
 - `GET|POST /devices`, `GET|PATCH|DELETE /devices/{id}`
 - `GET /entities`, `GET /entities/{entity_id}`, `PATCH /entities/{entity_id}/state`, `GET /entities/{entity_id}/history`
@@ -66,8 +67,8 @@ Expected results:
 - `compileall` completes without syntax errors.
 - `pytest` passes unit and PostgreSQL-backed API integration tests. Start PostgreSQL first with `docker compose up -d postgres` if your local database is not already running.
 - `smoke.sh` prints `Smoke checks passed for http://localhost:8080/api`.
-- The smoke flow verifies `GET /api/health` returns `200`, unauthenticated `GET /api/auth/me` returns `401`, login returns a JWT, `GET /api/dashboard` returns seeded data, motion turns `light.hallway` on, and recent events include an automation event.
+- The smoke flow verifies `GET /api/health` returns `200`, unauthenticated `GET /api/auth/me` returns `401`, login returns a JWT, `GET /api/dashboard` returns seeded data, mock integration discovery/import works, motion turns `light.hallway` on, and recent events include an automation event.
 
 ## MVP Limits
 
-There are no real Zigbee/Z-Wave/MQTT integrations. Energy readings, sensor changes, and forecast are deterministic/mock data. Forecast returns `confidence: "mock"` and repeats recent readings.
+There are no real Zigbee/Z-Wave/MQTT integrations. Integration onboarding uses deterministic mock discovery/import data. Energy readings, sensor changes, and forecast are deterministic/mock data. Forecast returns `confidence: "mock"` and repeats recent readings.

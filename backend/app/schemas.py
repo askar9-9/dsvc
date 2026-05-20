@@ -52,6 +52,21 @@ class DeviceUpdate(BaseModel):
     model: str | None = None
 
 
+class IntegrationCreate(BaseModel):
+    name: str
+    domain: str = "demo"
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrationUpdate(BaseModel):
+    name: str | None = None
+    config: dict[str, Any] | None = None
+
+
+class IntegrationImport(BaseModel):
+    discovered_ids: list[str] | None = None
+
+
 class EntityStatePatch(BaseModel):
     state: str
     attributes: dict[str, Any] = Field(default_factory=dict)

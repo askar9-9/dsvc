@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Area, Automation, Device, Entity, Event, Home, User
+from app.models import Area, Automation, Device, Entity, Event, Home, Integration, User
 
 
 def user_out(user: User, include_created: bool = False) -> dict[str, Any]:
@@ -79,6 +79,19 @@ def device_out(device: Device, detailed: bool = False) -> dict[str, Any]:
     if detailed:
         data["entities"] = [entity_out(entity) for entity in device.entities]
     return data
+
+
+async def integration_out(db: AsyncSession, integration: Integration) -> dict[str, Any]:
+    device_count = (await db.execute(select(func.count(Device.id)).where(Device.integration_id == integration.id))).scalar_one()
+    return {
+        "id": str(integration.id),
+        "home_id": str(integration.home_id),
+        "name": integration.name,
+        "domain": integration.domain,
+        "config": integration.config_json or {},
+        "created_at": integration.created_at,
+        "device_count": device_count,
+    }
 
 
 def automation_out(automation: Automation) -> dict[str, Any]:

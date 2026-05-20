@@ -30,6 +30,28 @@ Known error codes include `bad_request`, `unauthorized`, `forbidden`, `not_found
   - Body: `name`, optional `time_zone`, nullable `latitude`, nullable `longitude`, optional `currency`
   - Response: `Home`
 
+## Integrations
+
+- `GET /integrations`
+  - Response: `Integration[]`
+- `POST /integrations`
+  - Body: `name`, optional `domain`, optional `config`
+  - Response: `Integration`
+- `GET /integrations/{integration_id}`
+  - Response: `Integration`
+- `PATCH /integrations/{integration_id}`
+  - Body: partial `name`, `config`
+  - Response: `Integration`
+- `DELETE /integrations/{integration_id}`
+  - Response: `204`
+- `GET /integrations/{integration_id}/discovery`
+  - Response: deterministic mock discovery rows with `discovered_id`, `suggested_entity_id`, `entities`, and `already_imported`
+- `POST /integrations/{integration_id}/import`
+  - Body: optional `{ "discovered_ids": string[] }`; omitted imports all discovered items
+  - Response: `{ "integration_id": uuid, "imported": number, "skipped": SkippedDiscovery[], "devices": Device[] }`
+
+Integration includes `config`, `device_count`, and ISO datetime fields. Supported onboarding domain is `demo`. Re-importing an already imported discovered device is idempotent and reports it in `skipped`.
+
 ## Areas
 
 - `GET /areas`

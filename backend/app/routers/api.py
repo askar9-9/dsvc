@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.routers import actions, areas, auth, automations, dashboard, devices, energy, entities, events, homes
+from app.routers import actions, areas, auth, automations, dashboard, devices, energy, entities, events, homes, integrations
 
 api = APIRouter(prefix="/api")
 
@@ -16,6 +16,7 @@ async def health() -> dict[str, Any]:
 
 api.include_router(auth.router)
 api.include_router(homes.router)
+api.include_router(integrations.router)
 api.include_router(areas.router)
 api.include_router(devices.router)
 api.include_router(entities.router)
