@@ -5,9 +5,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Select, and_, delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.eventbus import DomainEvent, event_bus
 from app.models import (
@@ -41,42 +40,6 @@ async def get_entity_or_404(db: AsyncSession, entity_id: str) -> Entity:
     if entity is None:
         raise HTTPException(404, "Entity not found")
     return entity
-
-
-def entity_out(entity: Entity) -> dict[str, Any]:
-    return {
-        "entity_id": entity.entity_id,
-        "domain": entity.domain,
-        "name": entity.name,
-        "device_id": str(entity.device_id) if entity.device_id else None,
-        "area_id": str(entity.area_id) if entity.area_id else None,
-        "state": entity.state,
-        "attributes": entity.attributes_json or {},
-        "unit_of_measurement": entity.unit_of_measurement,
-        "device_class": entity.device_class,
-        "last_changed": entity.updated_at,
-        "last_updated": entity.updated_at,
-    }
-
-
-def device_out(device: Device, detailed: bool = False) -> dict[str, Any]:
-    data = {
-        "id": str(device.id),
-        "name": device.name,
-        "name_by_user": device.name_by_user,
-        "type": device.type,
-        "manufacturer": device.manufacturer,
-        "model": device.model,
-        "area_id": str(device.area_id) if device.area_id else None,
-        "area_name": device.area.name if device.area else None,
-        "status": device.status,
-        "entity_count": len(device.entities),
-        "created_at": device.created_at,
-        "updated_at": device.updated_at,
-    }
-    if detailed:
-        data["entities"] = [entity_out(entity) for entity in device.entities]
-    return data
 
 
 async def create_default_entity_for_device(db: AsyncSession, device: Device) -> Entity:

@@ -48,6 +48,7 @@ async def test_dashboard_shape(auth_client: AsyncClient) -> None:
     assert body["summary"]["devices_total"] == EXPECTED_SEED_COUNTS["devices"]
     assert body["summary"]["devices_online"] == EXPECTED_SEED_COUNTS["devices"]
     assert body["summary"]["automations_active"] == EXPECTED_SEED_COUNTS["automations"]
+    assert {"devices_total", "devices_online", "automations_active", "energy_today_kwh", "current_power_w"} == set(body["summary"])
     assert isinstance(body["recent_events"], list)
 
 
@@ -95,6 +96,25 @@ async def test_devices_crud(auth_client: AsyncClient, db_session: AsyncSession) 
     assert deleted.status_code == 204
 
 
+async def test_contract_nullable_fields_and_date_serialization(auth_client: AsyncClient) -> None:
+    created = await auth_client.post("/api/devices", json={"name": "Loose Sensor", "type": "sensor"})
+
+    assert created.status_code == 201
+    device = created.json()
+    assert device["area_id"] is None
+    assert device["area_name"] is None
+    assert device["manufacturer"] is None
+    assert device["model"] is None
+    assert device["name_by_user"] is None
+    assert "T" in device["created_at"]
+
+    entity = device["entities"][0]
+    assert entity["area_id"] is None
+    assert entity["unit_of_measurement"] == ""
+    assert entity["device_class"] is None
+    assert "T" in entity["last_changed"]
+
+
 async def test_action_call_writes_state_history_and_event(auth_client: AsyncClient, db_session: AsyncSession) -> None:
     response = await auth_client.post(
         "/api/actions/call",
@@ -140,6 +160,29 @@ async def test_motion_trigger_runs_hallway_automation(auth_client: AsyncClient, 
     assert run_count == 1
     assert automation_event is not None
     assert state_event is not None
+    assert automation_event.metadata_json == {"triggered_by": "state_changed:binary_sensor.hallway_motion"}
+
+
+async def test_events_contract_pagination_and_serialization(auth_client: AsyncClient) -> None:
+    await auth_client.patch("/api/entities/light.bedroom_light/state", json={"state": "on"})
+    await auth_client.patch("/api/entities/light.bedroom_light/state", json={"state": "off"})
+
+    page = await auth_client.get("/api/events", params={"entity_id": "light.bedroom_light", "limit": 1, "offset": 1})
+    clamped = await auth_client.get("/api/events", params={"limit": 999, "offset": -5})
+
+    assert page.status_code == 200
+    body = page.json()
+    assert body["total"] >= 2
+    assert body["limit"] == 1
+    assert body["offset"] == 1
+    assert len(body["events"]) == 1
+    event = body["events"][0]
+    assert {"id", "entity_id", "event_type", "old_state", "new_state", "source", "user_id", "automation_id", "metadata", "created_at"} == set(event)
+    assert "T" in event["created_at"]
+
+    assert clamped.status_code == 200
+    assert clamped.json()["limit"] == 200
+    assert clamped.json()["offset"] == 0
 
 
 async def test_energy_endpoints_return_expected_fields(auth_client: AsyncClient) -> None:

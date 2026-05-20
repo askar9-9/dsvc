@@ -13,6 +13,20 @@ fi
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+wait_for_backend() {
+  retries="${SMOKE_RETRIES:-30}"
+  delay="${SMOKE_DELAY_SECONDS:-2}"
+  while [ "$retries" -gt 0 ]; do
+    if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    retries=$((retries - 1))
+    sleep "$delay"
+  done
+  echo "FAIL backend did not become ready at $BASE_URL/health"
+  exit 1
+}
+
 request() {
   method="$1"
   path="$2"
@@ -38,6 +52,7 @@ request() {
   fi
 }
 
+wait_for_backend
 request GET /health 200
 request GET /auth/me 401
 
