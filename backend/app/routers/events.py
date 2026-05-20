@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.eventbus import event_bus
 from app.models import Entity, Event
-from app.routers.deps import CurrentUser, Db
+from app.routers.deps import CurrentUser, Db, SseCurrentUser
 from app.serializers import event_out
 
 router = APIRouter()
@@ -65,7 +65,7 @@ async def list_events(
 
 
 @router.get("/events/stream")
-async def events_stream(_: CurrentUser, request: Request) -> EventSourceResponse:
+async def events_stream(_: SseCurrentUser, request: Request) -> EventSourceResponse:
     async def generator():
         async for event in event_bus.stream():
             if await request.is_disconnected():

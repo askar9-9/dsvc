@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.eventbus import DomainEvent, event_bus
 from app.models import Area, AutomationRun, Device, Entity, EntityState, Event, Integration
 from app.seed import EXPECTED_SEED_COUNTS, seed_counts, seed_database
 
@@ -36,6 +37,25 @@ async def test_login_success_and_failure(client: AsyncClient) -> None:
     assert body["expires_in"] > 0
     assert body["user"]["username"] == "testadmin"
     assert failure.status_code == 401
+
+
+async def test_events_stream_accepts_query_token(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    login = await client.post("/api/auth/login", json={"username": "testadmin", "password": "testpass123"})
+    token = login.json()["access_token"]
+
+    missing = await client.get("/api/events/stream")
+    invalid = await client.get("/api/events/stream", params={"token": "not-a-token"})
+
+    async def one_event():
+        yield DomainEvent(type="state_changed", entity_id="light.hallway", new_state="on")
+
+    monkeypatch.setattr(event_bus, "stream", one_event)
+    valid = await client.get("/api/events/stream", params={"token": token})
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert valid.status_code == 200
+    assert "light.hallway" in valid.text
 
 
 async def test_dashboard_shape(auth_client: AsyncClient) -> None:

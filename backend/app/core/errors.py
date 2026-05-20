@@ -15,6 +15,7 @@ def install_error_handlers(app: FastAPI) -> None:
             404: "not_found",
             409: "conflict",
             422: "validation_error",
+            503: exc.detail if isinstance(exc.detail, str) else "service_unavailable",
         }.get(exc.status_code, "error")
         message = exc.detail if isinstance(exc.detail, str) else code
         return JSONResponse(status_code=exc.status_code, content={"error": code, "message": message})

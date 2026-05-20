@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.routers import actions, areas, auth, automations, dashboard, devices, energy, entities, events, homes, integrations
+from app.routers import actions, areas, auth, automations, dashboard, devices, energy, entities, events, homes, integrations, ml
 
 api = APIRouter(prefix="/api")
 
@@ -24,4 +24,5 @@ api.include_router(actions.router)
 api.include_router(events.router)
 api.include_router(automations.router)
 api.include_router(energy.router)
+api.include_router(ml.router)
 api.include_router(dashboard.router)

@@ -49,6 +49,7 @@ Base URL: `http://localhost:8080/api`
 - `GET /dashboard`
 
 All endpoints except `/api/health` and `/api/auth/login` require `Authorization: Bearer <jwt>`.
+`GET /api/events/stream` also accepts `?token=<jwt>` for native browser `EventSource` clients.
 
 ## Verification
 
